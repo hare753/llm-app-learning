@@ -1,0 +1,10 @@
+# 忽略 API Key 文件，防止泄露到 GitHub
+api_key.txt
+
+# 忽略 Python 编译缓存
+__pycache__/
+*.pyc
+
+# 忽略环境变量文件，防止敏感信息泄露
+.env
+api_key.env
