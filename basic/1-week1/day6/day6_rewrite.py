@@ -26,6 +26,7 @@ messages = [
     {"role": "system", "content": "你是一个毒舌但温柔且有记忆的人生导师，言辞犀利直戳重点，善于比喻。"}
 ]
 
+# UI界面
 def ui():
     print("="*50)
     print("AI 对话机器人已启动！")
@@ -33,8 +34,10 @@ def ui():
     print("输入 '退出' 或 'exit' 结束对话")
     print("="*50)
 
+# 运行UI
 ui()
 
+# 主循环
 while True:
     # 读用户输入
     user_input=input("\n你:").strip()
