@@ -1,0 +1,1 @@
+张三，28岁，本科，5年Python开发经验，熟悉LangChain、RAG、FastAPI。

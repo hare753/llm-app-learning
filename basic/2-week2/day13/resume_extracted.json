@@ -1,0 +1,11 @@
+{
+  "name": "张三",
+  "skills": [
+    "Python",
+    "LangChain",
+    "RAG",
+    "FastAPI"
+  ],
+  "years": 5,
+  "education": "本科"
+}
