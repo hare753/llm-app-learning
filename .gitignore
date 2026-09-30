@@ -41,3 +41,7 @@ env/
 # 忽略脚本生成的输出文件
 day15_*_raw.txt
 basic/2-week2/day13/*_extracted.json
+
+# 忽略本地数据库文件
+extractions.db
+*.db
