@@ -37,3 +37,7 @@ env/
 # 叹号表示“反忽略”：.env.example 是模板文件（只写变量名不写真实值），
 # 需要上传，方便别人知道需要配置哪些变量。
 !.env.example
+
+# 忽略脚本生成的输出文件
+day15_*_raw.txt
+basic/2-week2/day13/*_extracted.json
