@@ -26,7 +26,9 @@
 
 # FastAPI：应用类，用来创建整个 Web 应用实例
 # HTTPException：用来主动抛出 HTTP 错误码（如 400、500）
-from fastapi import FastAPI, HTTPException
+# ★ 新增 Query：用来给查询参数加约束（比如 limit 的范围），
+#   不写 Query 也能跑，但加上它能自动校验并在 /docs 里显示范围。
+from fastapi import FastAPI, HTTPException, Query
 
 # BaseModel：Pydantic 的基类，用于定义请求体结构，自动做类型校验
 from pydantic import BaseModel
@@ -208,3 +210,75 @@ def extract_api(req: ExtractRequest):
     #   - 不直接把内部 dict 裸暴露给客户端
     #   - FastAPI 会自动把 dict 序列化为 JSON 响应
     return {"result": result}
+
+
+# ------------------------------------------------------------
+# 八、★ 新增：查询历史记录接口
+# ------------------------------------------------------------
+# 路径：GET /records?limit=10
+# 作用：把 extractions 表里的记录按 id 倒序取出，返回 JSON 数组。
+#
+# 参数 limit：
+#   默认 10，最少 0，最多 100。
+#   FastAPI 会根据 Query(...) 的约束自动做校验：
+#     - limit 传 200 → 返回 422（超过 le=100）
+#     - limit 传 -1  → 返回 422（小于 ge=0）
+#     - limit 不传   → 使用默认值 10
+#
+# 为什么用 conn.row_factory = sqlite3.Row：
+#   默认查询结果每行是一个 tuple，只能按位置取（row[0]、row[1]）。
+#   设置 row_factory 后，每行变成类似字典的对象，可以按列名取（row["id"]）。
+#   代码可读性更好，也不怕以后列顺序变化。
+#
+# 为什么返回 result 时还要 json.loads：
+#   库里存的是 JSON 字符串，直接返回会让客户端拿到 "{\"name\":\"张三\"}"
+#   这样的字符串。json.loads 还原成 dict 后，FastAPI 会自动序列化成
+#   嵌套对象返回，客户端用起来更自然。
+@app.get("/records")
+def get_records(limit: int = Query(10, ge=0, le=100)):
+    """
+    查询历史抽取记录，默认返回最近 10 条。
+    limit=0 时返回空数组。
+    """
+    # 1. 打开数据库连接，并设置行工厂，让 row 支持按列名访问。
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    # 2. try/finally 保证无论查询是否出错，连接最终都会被关闭。
+    #    （不写 finally 也能跑通，但某天查询报错时连接会泄漏。）
+    try:
+        # 3. 执行查询。
+        #    ORDER BY id DESC：最新的记录排最前。
+        #    LIMIT ?：参数化占位符，防注入。
+        rows = conn.execute(
+            """
+            SELECT id, filename, result_json, created_at
+            FROM extractions
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # 4. 把每行转成 dict，并解析 result_json。
+    records = []
+    for row in rows:
+        # 反序列化：库里存的是字符串，转回 Python 对象。
+        # 万一存的时候出过问题（比如手动往库里塞了非法 JSON），
+        # 用 try/except 兜底，避免整个接口 500。
+        try:
+            result_obj = json.loads(row["result_json"]) if row["result_json"] else None
+        except json.JSONDecodeError:
+            result_obj = {"_raw": row["result_json"]}
+
+        records.append({
+            "id": row["id"],
+            "filename": row["filename"],
+            "result": result_obj,
+            "created_at": row["created_at"],
+        })
+
+    # 5. 返回列表。FastAPI 会自动序列化成 JSON 数组。
+    return records
