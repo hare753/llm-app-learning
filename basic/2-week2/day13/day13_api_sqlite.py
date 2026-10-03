@@ -42,6 +42,11 @@ import sqlite3
 # 读库时再 json.loads 还原成 dict。
 import json
 
+# 从 Python 标准库 typing 导入 List，
+# 用于在 Pydantic 模型里声明「字符串列表」这种类型。
+# 不加也能用 list[str]，但 List[str] 兼容性更好，写法也更常见。
+from typing import List
+
 # 导入 day13 主线脚本里的抽取函数。
 # 注意：这里能 import 成功，是因为 day13_extractor.py 里
 #      用 if __name__ == "__main__": 包住了命令行逻辑，
@@ -128,6 +133,16 @@ init_db()
 class ExtractRequest(BaseModel):
     text: str
 
+# ------------------------------------------------------------
+# 五之二、批量请求体模型
+# ------------------------------------------------------------
+# 客户端 POST 过来的 JSON 必须包含一个 texts 字段，且必须是字符串列表。
+# Pydantic 会自动校验：
+#   - 缺 texts 字段       → 422
+#   - texts 不是列表      → 422
+#   - 列表里元素不是字符串 → 422
+class BatchExtractRequest(BaseModel):
+    texts: List[str]
 
 # ------------------------------------------------------------
 # 六、健康检查接口
@@ -282,3 +297,113 @@ def get_records(limit: int = Query(10, ge=0, le=100)):
 
     # 5. 返回列表。FastAPI 会自动序列化成 JSON 数组。
     return records
+
+# ------------------------------------------------------------
+# 九、★ 新增：批量抽取接口
+# ------------------------------------------------------------
+# 路径：POST /batch-extract
+# 请求体：{"texts": ["文本1", "文本2", ...]}
+# 返回：{"total": n, "success": m, "failed": k, "results": [...]}
+#
+# 核心设计原则：单条失败不中断整体。
+#   两层 try/except 各司其职：
+#     - 内层（for 循环里）：捕获单条失败，记 failed，continue 下一条
+#     - 外层（for 循环外）：捕获数据库级别异常，rollback + 抛 500
+#
+# 为什么用 index + text 双标记：
+#   - index 精确定位到输入列表位置，保证唯一
+#   - text 方便肉眼扫是哪条（截断到 50 字，避免长文本撑爆响应）
+#
+# 为什么统一 commit：
+#   循环内只 execute，循环外一次 commit，减少磁盘 I/O。
+#   配合 rollback，保证「全成功才落盘，中途崩全回滚」。
+@app.post("/batch-extract")
+def batch_extract(req: BatchExtractRequest):
+    """
+    批量抽取：
+    - 循环调用 extract()
+    - 单条失败记录错误，不中断整体
+    - 成功的写入 SQLite
+    - 返回统计：total / success / failed / results
+    """
+    total = len(req.texts)
+    success_count = 0
+    failed_count = 0
+    results = []
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    try:
+        for i, text in enumerate(req.texts):
+            # ---- 内层 try/except：单条失败不中断整批 ----
+            try:
+                # 1. 空文本直接判失败，不调 API，省 token
+                if not text or not text.strip():
+                    failed_count += 1
+                    results.append({
+                        "index": i,
+                        "text": text[:50],           # 截断，避免长文本膨胀
+                        "status": "failed",
+                        "error": "文本不能为空",
+                    })
+                    continue
+
+                # 2. 复用主线抽取函数
+                extract_result = extract(text)
+
+                # 3. extract() 返回 None（模型输出解析失败）
+                if extract_result is None:
+                    failed_count += 1
+                    results.append({
+                        "index": i,
+                        "text": text[:50],
+                        "status": "failed",
+                        "error": "抽取失败",
+                    })
+                    continue
+
+                # 4. 成功 → 写库 + 记 success
+                cursor.execute(
+                    "INSERT INTO extractions (filename, result_json) VALUES (?, ?)",
+                    ("batch_request", json.dumps(extract_result, ensure_ascii=False)),
+                )
+                success_count += 1
+                results.append({
+                    "index": i,
+                    "text": text[:50],
+                    "status": "success",
+                    "result": extract_result,        # ← 用 result，和接口名统一
+                })
+
+            except Exception as e:
+                # ← 单条内部异常（网络超时等），只记这一条失败，不打断循环
+                failed_count += 1
+                results.append({
+                    "index": i,
+                    "text": text[:50] if text else "",
+                    "status": "failed",
+                    "error": f"单条处理异常: {e}",
+                })
+                # 注意：这里不 continue 也行，因为已经是 for 循环最后一件事
+
+        # ---- 全部处理完，统一提交 ----
+        conn.commit()
+
+        return {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "results": results,
+        }
+
+    except Exception as e:
+        # ---- 外层 try/except：数据库级别异常 ----
+        # 走到这里说明是循环外的错误（比如建表失败、磁盘满），
+        # 已经处理的数据全部回滚，避免半截写入污染数据库。
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"批量处理异常: {e}")
+
+    finally:
+        # ---- 无论成功/失败，连接一定关闭 ----
+        conn.close()
