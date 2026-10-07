@@ -6,8 +6,8 @@
 #   为后续 Day16 的 GET /records 历史查询、Day18 的批量接口做准备。
 #
 # 与 day13_api.py 的区别：
-#   1. 多了 sqlite3、json 两个 import
-#   2. 多了 DB_PATH 常量和 init_db() 函数
+#   1. 多了 os、sqlite3、json 三个 import
+#   2. 多了 BASE_DIR / DB_PATH 常量和 init_db() 函数
 #   3. POST /extract 成功后，多了一步「写库」操作
 #   4. 接口逻辑、错误码、请求体模型完全不变
 #
@@ -32,6 +32,11 @@ from fastapi import FastAPI, HTTPException, Query
 
 # BaseModel：Pydantic 的基类，用于定义请求体结构，自动做类型校验
 from pydantic import BaseModel
+
+# os 用于定位脚本所在目录，拼出数据库文件的绝对路径。
+# 加它的原因：DB_PATH 要从「相对路径」改成「基于 __file__ 的绝对路径」，
+# 否则在哪个目录启动 uvicorn，数据库就落在哪个目录（会出现多份）。
+import os
 
 # sqlite3 是 Python 标准库自带，无需 pip 安装。
 # 它提供 PEP 249 规范的接口：connect / cursor / execute / commit / close，
@@ -62,12 +67,23 @@ app = FastAPI(title="LLM 信息抽取 API + SQLite")
 
 
 # ------------------------------------------------------------
-# 三、SQLite 数据库路径
+# 三、SQLite 数据库路径（绝对路径，与启动目录解耦）
 # ------------------------------------------------------------
-# 使用相对路径 "extractions.db"，相对的是「启动 uvicorn 时所在目录」。
-# 所以在 basic/2-week2/day13/ 下启动 uvicorn，数据库文件就固定生成在该目录。
+# 【为什么不用相对路径 "extractions.db"】
+#   相对路径相对的是「启动 uvicorn 时所在目录」。
+#   在 day13/ 下启动   → 库落在 day13/；
+#   在 code/ 根目录误启动一次 → 库就落在了根目录，出现两份。
+#   这和 Day15 踩过的坑是同一类问题（当时是 day15_*_raw.txt 落错目录）。
+#
+# 【正确做法：基于 __file__ 锚定】
+#   os.path.abspath(__file__) → 当前脚本的绝对路径
+#   os.path.dirname(...)      → 取所在目录（即 day13/）
+#   os.path.join(BASE_DIR, "extractions.db")
+#                             → 数据库永远落在 day13/，不受启动目录影响
+#
 # 该文件已在 .gitignore 中忽略，不会上传 GitHub。
-DB_PATH = "extractions.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "extractions.db")
 
 
 # ------------------------------------------------------------
