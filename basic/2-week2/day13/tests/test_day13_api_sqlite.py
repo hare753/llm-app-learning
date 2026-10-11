@@ -82,3 +82,60 @@ def test_extract_empty_text():
     # 全空格字符串（strip 后为空，也应被拒绝）
     resp2 = client.post("/extract", json={"text": "   "})
     assert resp2.status_code == 400
+
+# ============================================================
+# Day20 并行后端：边界用例补充
+# 目标：覆盖参数极值与异常输入，验证 Day19 的 DB_PATH 修复未引入回归
+# 覆盖：limit 极值、批量空列表、全空白文本
+# ============================================================
+
+def test_records_limit_zero():
+    """GET /records?limit=0 应返回空数组，不报错"""
+    # Query(10, ge=0, le=100) 允许 limit=0，走到 SQL 就是 LIMIT 0
+    # 语义上「限制 0 条」= 什么都不返回，是合法输入，不是参数错误
+    resp = client.get("/records?limit=0")
+
+    # 1. 状态码 200：0 在合法范围内，不能被 Pydantic 拦成 422
+    #    若这条失败，说明 Query 边界写成了 gt=0 而不是 ge=0
+    assert resp.status_code == 200
+
+    # 2. 响应体必须是空数组，不是 None、不是 {}
+    #    严格断言 == [] 能同时抓到「返回 None」和「返回 {'records': []}」两类结构错误
+    assert resp.json() == []
+
+
+def test_batch_extract_empty_list():
+    """POST /batch-extract 空列表：统计全 0，results 空"""
+    # 空列表不是参数错误，是「没有活干」的正常输入
+    # 若这条返回 400，说明 Day18 实现把空列表当非法输入拦了，语义就错了
+    resp = client.post("/batch-extract", json={"texts": []})
+
+    # 1. 必须是 200，不是 400
+    assert resp.status_code == 200
+
+    # 2. 四个统计字段全部为 0 / 空，一个都不能少
+    #    Day18 定义的响应契约就是这四个 key，少一个前端就得改代码
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["success"] == 0
+    assert data["failed"] == 0
+
+    # 3. results 必须是空数组
+    #    严格断言 == []，不是「长度 0」，确保类型就是 list
+    assert data["results"] == []
+
+
+def test_extract_whitespace_text():
+    """POST /extract 全空白文本（含换行和 Tab）应返回 400"""
+    # 关键测试点：不是「空字符串」，而是「看起来有内容但 strip 后为空」
+    # 文本内容是 3 个空格 + \n + \t + 2 个空格
+    # 接口内部用 req.text.strip() 判断，.strip() 会剥掉空格/换行/Tab/回车
+    # 若接口只判 `if not text`（不 strip），这条会误返回 200，测试就能抓到
+    resp = client.post("/extract", json={"text": "   \n\t  "})
+
+    # 1. 必须 400：这是参数错误，不是业务错误
+    assert resp.status_code == 400
+
+    # 2. 可选：再确认 detail 信息
+    #    detail 里应包含「不能为空」之类的提示，方便前端展示
+    #    若想更严格，可加：assert "不能为空" in resp.json()["detail"]
