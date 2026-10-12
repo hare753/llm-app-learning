@@ -10,6 +10,7 @@
 | Day18 | FC 多工具              | `3-week3/day18/day18_multi_tools.py`       |
 | Day19 | 工具参数校验与错误回传 | `3-week3/day19/day19_tool_validation.py`   |
 | Day20 | 批量抽取 CLI           | `2-week2/day13/day20_batch_extract_cli.py` |
+| Day21 | 综合整合 + README      | `3-week3/day21/week3_summary.md`           |
 
 ## 并行后端 A（FastAPI + SQLite）
 
@@ -39,6 +40,14 @@
 
 ## 下一步
 
-阶段一（Prompt 工程深化）内容已全部覆盖：API 参数、结构化输出、Prompt 模板化、Few-shot、批量处理、Function Calling。
+**Week4 进入阶段二：RAG 与上下文管理。**
 
-Week4 具体安排待定。
+主线：文档加载 → 切块 → 向量化 → 检索 → 生成。
+并行：RAG 封装为 FastAPI 服务，`POST /upload` + `POST /chat`；文档/切块元数据入 SQLite。
+
+**Week4 同步进行（占复盘槽，不单独占天）：**
+- 顶层 README 改写（"这个项目是什么"视角）
+- Week3 产出打包成可投递的小项目
+- 简历量化描述（pytest 7 passed、12/12 解析率、4 接口）
+
+阶段一（Prompt 工程深化）内容已全部覆盖：API 参数、结构化输出、Prompt 模板化、Few-shot、批量处理、Function Calling。
